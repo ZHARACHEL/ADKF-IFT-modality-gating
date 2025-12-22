@@ -50,6 +50,7 @@ class ModalityGate(nn.Module):
         # Output: [gate_1, gate_2, gate_3]
         input_dim = num_modalities * 2  # mean + std per modality
         self.gate_generator = nn.Sequential(
+            nn.LayerNorm(input_dim),
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, num_modalities),

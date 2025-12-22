@@ -175,7 +175,9 @@ def main():
         logger.info(f"Loading pretrained GNN weights from {args.pretrained_gnn}.")
         model_trainer.load_model_gnn_weights(path=args.pretrained_gnn, device=device)
 
-    model_trainer.train_loop(out_dir, dataset, device, aml_run)
+    import gpytorch
+    with gpytorch.settings.cholesky_jitter(1e-3):
+        model_trainer.train_loop(out_dir, dataset, device, aml_run)
 
 
 if __name__ == "__main__":

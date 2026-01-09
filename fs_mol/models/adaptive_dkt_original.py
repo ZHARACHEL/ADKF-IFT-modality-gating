@@ -103,114 +103,6 @@ class ModalityGate(nn.Module):
         return gates.squeeze(0)  # [num_modalities]
 
 
-class StatisticsAwareAdapter(nn.Module):
-    """
-    Statistics-Aware Adapter for fixed descriptors (ECFP / PC-descs).
-    
-    设计原则：
-    - 轻量级：参数量 < 100，适合 few-shot 场景
-    - 统计感知：仅使用 batch 级全局统计量，不引入 sample-level attention
-    - 可解释：学习 scale 和 shift 的调整因子，而非重学特征
-    
-    与 Modality Gate 的关系（互补）：
-    - Gate: 决定"用不用这个模态"（0-1 权重）
-    - Adapter: 决定"怎么用这个模态"（尺度对齐）
-    
-    Inductive Bias:
-    - 假设 fixed descriptors 需要 batch-adaptive 的尺度校准
-    - 使用全局统计量意味着：同一 batch 内的样本共享相同的 scale/shift
-    - 这与 GP 的核函数假设一致：特征尺度影响相似性度量
-    
-    参数量：
-    - adapter MLP: 6×4 + 4 + 4×2 + 2 = 38
-    - base scale/shift: 2
-    - 总计: ~40 参数
-    """
-    
-    def __init__(self, hidden_dim: int = 4):
-        """
-        Args:
-            hidden_dim: 隐藏层维度（默认4，极小化参数量）
-        """
-        super().__init__()
-        
-        # 输入统计量维度: [batch_mean, batch_std, col_mean_mean, col_mean_std, l2_mean, l2_std]
-        num_stats = 6
-        
-        # Tiny MLP: 统计量 → 调整因子
-        # 输出: [delta_scale, delta_shift]
-        self.adapter = nn.Sequential(
-            nn.Linear(num_stats, hidden_dim),   # 6×4 + 4 = 28 params
-            nn.Tanh(),                          # 有界激活，防止极端调整
-            nn.Linear(hidden_dim, 2),           # 4×2 + 2 = 10 params
-        )
-        
-        # 可学习的基础 scale 和 shift（初始化为恒等变换）
-        self.base_scale = nn.Parameter(torch.ones(1))
-        self.base_shift = nn.Parameter(torch.zeros(1))
-        
-        # 初始化 adapter 输出接近 0，使初始行为接近恒等变换
-        nn.init.zeros_(self.adapter[-1].weight)
-        nn.init.zeros_(self.adapter[-1].bias)
-    
-    def compute_statistics(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        计算 batch 级统计量。
-        
-        Args:
-            x: [N, D] 特征张量
-            
-        Returns:
-            stats: [6] 统计量向量
-                - batch_mean: 所有元素的均值
-                - batch_std: 所有元素的标准差
-                - col_mean_mean: 各列均值的均值
-                - col_mean_std: 各列均值的标准差
-                - l2_mean: L2 范数的均值
-                - l2_std: L2 范数的标准差
-        """
-        # 全局统计
-        batch_mean = x.mean()
-        batch_std = x.std() + 1e-6
-        
-        # 列级统计的统计
-        col_means = x.mean(dim=0)  # [D]
-        col_mean_mean = col_means.mean()
-        col_mean_std = col_means.std() + 1e-6
-        
-        # L2 范数统计
-        l2_norms = torch.norm(x, p=2, dim=1)  # [N]
-        l2_mean = l2_norms.mean()
-        l2_std = l2_norms.std() + 1e-6
-        
-        return torch.stack([batch_mean, batch_std, col_mean_mean, col_mean_std, l2_mean, l2_std])
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        应用统计感知的 affine 变换。
-        
-        Args:
-            x: [N, D] 原始特征
-            
-        Returns:
-            x_adapted: [N, D] 适配后的特征
-        """
-        # 计算统计量
-        stats = self.compute_statistics(x)  # [6]
-        
-        # 生成调整因子
-        adjustments = self.adapter(stats.unsqueeze(0))  # [1, 2]
-        delta_scale = adjustments[0, 0]
-        delta_shift = adjustments[0, 1]
-        
-        # 组合基础参数和动态调整
-        # 使用 softplus 确保 scale > 0
-        scale = torch.nn.functional.softplus(self.base_scale + delta_scale)
-        shift = self.base_shift + delta_shift
-        
-        # 应用 affine 变换
-        return x * scale + shift
-
 @dataclass(frozen=True)
 class ADKTModelConfig:
     # Model configuration:
@@ -222,10 +114,6 @@ class ADKTModelConfig:
     # Modality gating configuration:
     use_modality_gating: bool = True
     gating_hidden_dim: int = 8  # Minimal hidden dim for <100 parameters
-    
-    # Statistics-Aware Adapter configuration (for ECFP and PC-descs):
-    use_statistics_adapter: bool = True  # 是否启用统计感知适配器
-    adapter_hidden_dim: int = 4  # 适配器隐藏层维度（极小化参数量）
 
 
 class ADKTModel(nn.Module):
@@ -288,17 +176,6 @@ class ADKTModel(nn.Module):
                 num_modalities=num_modalities,
                 hidden_dim=self.config.gating_hidden_dim
             )
-        
-        # Create Statistics-Aware Adapters for fixed descriptors:
-        if self.config.use_statistics_adapter:
-            if "ecfp" in self.config.used_features:
-                self.ecfp_adapter = StatisticsAwareAdapter(
-                    hidden_dim=self.config.adapter_hidden_dim
-                )
-            if "pc-descs" in self.config.used_features:
-                self.pc_adapter = StatisticsAwareAdapter(
-                    hidden_dim=self.config.adapter_hidden_dim
-                )
 
         self.__create_tail_GP(kernel_type=self.config.gp_kernel)
 
@@ -406,7 +283,7 @@ class ADKTModel(nn.Module):
             query_nan_mask = torch.isnan(query_descs)
             
             support_descs = torch.where(support_nan_mask, col_means.unsqueeze(0).expand_as(support_descs), support_descs)
-            query_descs = torch.where(query_nan_mask, col_means.unsqueeze(0).expand_as(query_descs), query_descs)
+            query_descs = torch.where(query_nan_mask, col_means.unsqueeze(0).expand_as(query_descs), query_descs) #query用support的列平均值填充
             
             # Step 2: 裁剪极端值（防止数值爆炸）
             support_descs = torch.clamp(support_descs, min=-1e6, max=1e6)
@@ -414,7 +291,7 @@ class ADKTModel(nn.Module):
             
             # Step 3: 标准化（使用 support 集的统计量）
             col_std = support_descs.std(dim=0) + 1e-6  # 防止除零
-            support_descs = (support_descs - col_means) / col_std
+            support_descs = (support_descs - col_means) / col_std #support标准化，每一列(原值-平均值）/标准差
             query_descs = (query_descs - col_means) / col_std
             
             # Step 4: 再次裁剪标准化后的极端值
@@ -428,29 +305,6 @@ class ADKTModel(nn.Module):
             support_features.append(support_descs)
             query_features.append(query_descs)
             modality_names.append("pc")  # 👈 新增
-
-        # ========== 应用 Statistics-Aware Adapters ==========
-        # 在送入 modality gate 之前，对 fixed descriptors 应用可学习的尺度调整
-        if self.config.use_statistics_adapter:
-            adapted_support_features = []
-            adapted_query_features = []
-            
-            for i, (support_feat, query_feat, name) in enumerate(zip(support_features, query_features, modality_names)):
-                if name == "ecfp" and hasattr(self, 'ecfp_adapter'):
-                    # ECFP: 应用适配器（使用 support 集的统计量）
-                    support_feat = self.ecfp_adapter(support_feat)
-                    query_feat = self.ecfp_adapter(query_feat)
-                elif name == "pc" and hasattr(self, 'pc_adapter'):
-                    # PC-descs: 应用适配器
-                    support_feat = self.pc_adapter(support_feat)
-                    query_feat = self.pc_adapter(query_feat)
-                # GNN 特征不应用适配器（已有端到端学习）
-                
-                adapted_support_features.append(support_feat)
-                adapted_query_features.append(query_feat)
-            
-            support_features = adapted_support_features
-            query_features = adapted_query_features
 
         # Apply modality-level gating if enabled
         if self.config.use_modality_gating:

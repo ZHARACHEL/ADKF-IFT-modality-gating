@@ -16,12 +16,12 @@ from fs_mol.utils.gp_utils import VariationalGPLayer, ExactGPLayer
 import gpytorch
 from gpytorch.distributions import MultivariateNormal
 
-from botorch.optim.fit import fit_gpytorch_scipy
+from botorch.optim.fit import fit_gpytorch_torch
 
 #from fs_mol.utils._stateless import functional_call
 
 FINGERPRINT_DIM = 2048
-PHYS_CHEM_DESCRIPTORS_DIM = 42
+PHYS_CHEM_DESCRIPTORS_DIM = 200
 
 
 @dataclass(frozen=True)
@@ -104,7 +104,7 @@ class ADKTVGPModel(nn.Module):
             exact_gp_model.covar_module.base_kernel.lengthscale = torch.ones_like(exact_gp_model.covar_module.base_kernel.lengthscale) * median_lengthscale_init
         
         exact_gp_model.set_train_data(inputs=train_x.detach(), targets=train_y_regression.detach(), strict=False)
-        fit_gpytorch_scipy(exact_mll)
+        fit_gpytorch_torch(exact_mll, options={'maxiter': 50})
 
         self.__create_tail_GP(train_x=train_x, train_y=train_y, kernel_type=self.config.gp_kernel)
 

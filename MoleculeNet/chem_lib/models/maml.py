@@ -12,8 +12,12 @@
 import traceback
 
 import torch
-from learn2learn.algorithms.base_learner import BaseLearner
-from learn2learn.utils import clone_module, update_module
+# Use local compatibility layer instead of learn2learn (avoids Windows compilation issues)
+try:
+    from learn2learn.algorithms.base_learner import BaseLearner
+    from learn2learn.utils import clone_module, update_module
+except ImportError:
+    from .l2l_compat import BaseLearner, clone_module, update_module
 from torch.autograd import grad
 
 

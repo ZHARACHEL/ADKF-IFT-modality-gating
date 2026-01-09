@@ -129,6 +129,17 @@ def parse_command_line():
         action="store_true",
         help="Ignore the second order term in the hypergradient. Default: False.",
     )
+    # ========== 门控和适配器控制 ==========
+    parser.add_argument(
+        "--no-gating",
+        action="store_true",
+        help="Disable modality gating. Default: gating is enabled.",
+    )
+    parser.add_argument(
+        "--no-adapter",
+        action="store_true",
+        help="Disable statistics-aware adapter. Default: adapter is enabled.",
+    )
     args = parser.parse_args()
     return args
 
@@ -153,6 +164,9 @@ def make_trainer_config(args: argparse.Namespace) -> ADKTModelTrainerConfig:
         use_lengthscale_prior=args.use_lengthscale_prior,
         use_numeric_labels=args.use_numeric_labels,
         ignore_grad_correction=args.ignore_grad_correction,
+        # 门控和适配器配置
+        use_modality_gating=not args.no_gating,  # 默认启用，--no-gating 禁用
+        use_statistics_adapter=not args.no_adapter,  # 默认启用，--no-adapter 禁用
     )
 
 
@@ -176,7 +190,7 @@ def main():
         model_trainer.load_model_gnn_weights(path=args.pretrained_gnn, device=device)
 
     import gpytorch
-    with gpytorch.settings.cholesky_jitter(1e-3):
+    with gpytorch.settings.cholesky_jitter(1.0):  # Increased from 1e-3 to handle numerical stability
         model_trainer.train_loop(out_dir, dataset, device, aml_run)
 
 

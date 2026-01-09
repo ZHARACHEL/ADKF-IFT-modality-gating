@@ -106,12 +106,60 @@ conda activate adkf-ift-fsmol
 ```
 
 #### 8. 下载数据集
+
+**方式A：在线下载（推荐）**
 ```bash
 wget -O fs-mol-dataset.tar https://figshare.com/ndownloader/files/31345321
 tar -xf fs-mol-dataset.tar
 mv fs-mol fs-mol-dataset
 rm fs-mol-dataset.tar
 ```
+
+**方式B：使用本地tar文件（如果已有fsmol.tar）**
+
+如果你在 Windows 本地已经有 `fsmol.tar` 文件（例如 `D:\Downloads\fsmol.tar`），可以：
+
+1. **将文件复制到 WSL 项目目录**
+   ```bash
+   # 假设 fsmol.tar 在 Windows 的 D:\Downloads\ 目录
+   cp /mnt/d/Downloads/fsmol.tar ~/ADKF-IFT-main/
+   cd ~/ADKF-IFT-main
+   ```
+
+2. **解压文件**
+   ```bash
+   tar -xf fsmol.tar
+   mv fs-mol fs-mol-dataset
+   rm fsmol.tar
+   ```
+
+**方式C：直接在 Windows 解压（无需 WSL）**
+
+如果你想直接在 Windows 下解压，返回到 PowerShell：
+
+1. **按 `Ctrl+D` 或输入 `exit` 退出 WSL**
+
+2. **在 PowerShell 中解压**
+   ```powershell
+   cd c:\Users\rachel\Desktop\ADKF-IFT-main
+   
+   # 方式1：使用自动化脚本（推荐）
+   .\extract_fsmol_windows.ps1
+   
+   # 方式2：手动使用 Windows tar（Windows 10 1803+）
+   tar -xf fsmol.tar
+   Rename-Item fs-mol fs-mol-dataset
+   
+   # 方式3：使用 7-Zip（如果已安装）
+   # 右键点击 fsmol.tar -> 7-Zip -> Extract Here
+   # 然后重命名 fs-mol 文件夹为 fs-mol-dataset
+   ```
+
+3. **重新进入 WSL 继续配置**
+   ```powershell
+   wsl
+   cd ~/ADKF-IFT-main
+   ```
 
 #### 9. 下载模型权重
 ```bash
@@ -148,7 +196,49 @@ python fs_mol/adaptive_dkt_test.py ./adkf-ift-classification.pt ./fs-mol-dataset
 \\wsl$\Ubuntu\home\你的用户名\ADKF-IFT-main
 ```
 
-### Q4: 下载速度太慢怎么办？
+### Q4: 我已经有 fsmol.tar 文件了，如何使用？
+
+如果你已经下载了 `fsmol.tar` 文件（例如在 `D:\Downloads\fsmol.tar`），有三种方式使用：
+
+**方式1：在 Windows 直接解压（最简单）**
+```powershell
+# 在 PowerShell 中，进入项目目录
+cd c:\Users\rachel\Desktop\ADKF-IFT-main
+
+# 如果 tar 文件不在项目目录，先复制过来
+Copy-Item D:\Downloads\fsmol.tar .
+
+# 运行自动解压脚本
+.\extract_fsmol_windows.ps1
+```
+
+**方式2：在 WSL 中使用**
+```bash
+# 在 Ubuntu/WSL 中
+cd ~/ADKF-IFT-main
+cp /mnt/d/Downloads/fsmol.tar .
+tar -xf fsmol.tar
+mv fs-mol fs-mol-dataset
+rm fsmol.tar
+```
+
+**方式3：使用 Windows tar 命令**
+```powershell
+# 在 PowerShell 中（需要 Windows 10 1803+）
+cd c:\Users\rachel\Desktop\ADKF-IFT-main
+tar -xf D:\Downloads\fsmol.tar
+Rename-Item fs-mol fs-mol-dataset
+```
+
+解压后验证：
+```bash
+# 应该看到三个文件夹
+ls fs-mol-dataset/
+# 输出应包含: train/  valid/  test/
+```
+
+### Q5: 下载速度太慢怎么办？
+
 
 可以在 Windows 浏览器中下载文件，然后复制到 WSL2：
 
@@ -161,7 +251,7 @@ python fs_mol/adaptive_dkt_test.py ./adkf-ift-classification.pt ./fs-mol-dataset
    cp /mnt/c/Users/rachel/Downloads/文件名 ~/ADKF-IFT-main/
    ```
 
-### Q5: 如何查看配置进度？
+### Q6: 如何查看配置进度？
 
 脚本运行时会显示进度，例如：
 ```

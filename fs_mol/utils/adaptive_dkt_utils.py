@@ -34,7 +34,7 @@ from fs_mol.utils.metric_logger import MetricLogger
 from fs_mol.utils.torch_utils import torchify
 from fs_mol.utils.test_utils import eval_model
 
-from botorch.optim.fit import fit_gpytorch_scipy
+from botorch.optim.fit import fit_gpytorch_torch
 
 from fs_mol.utils.cauchy_hypergradient import cauchy_hypergradient
 from fs_mol.utils.cauchy_hypergradient_jvp import cauchy_hypergradient_jvp
@@ -88,7 +88,17 @@ def run_on_batches(
         # Compute task loss
         model.train()
         _ = model(batch_features, train_loss=True)
-        fit_gpytorch_scipy(model.mll)
+        
+        # Ensure GP model and likelihood are in training mode before optimization
+        model.gp_model.train()
+        model.gp_likelihood.train()
+        
+        # Use torch optimizer instead of scipy to avoid input reference issues
+        try:
+            fit_gpytorch_torch(model.mll, options={'maxiter': 50})
+        except Exception as e:
+            # If optimization fails, just continue with current parameters
+            pass
 
         # Compute train loss on the support set at training time
         if not train:
@@ -270,10 +280,14 @@ class ADKTModelTrainer(ADKTModel):
 
         # Load parameters (names specialised to GNNMultitask model), but also collect
         # parameters for GNN parts / rest, so that we can create a LR warmup schedule:
-        gnn_params, other_params = [], []
+        gnn_params, other_params, gate_adapter_params = [], [], []
         gnn_feature_extractor_param_name = "graph_feature_extractor."
         for our_name, our_param in our_state_dict.items():
-            if (
+            # 首先检查是否是门控或Adapter参数
+            if 'gate' in our_name or 'adapter' in our_name:
+                gate_adapter_params.append(our_param)
+                logger.debug(f"I: Gate/Adapter parameter {our_name} will use 10x learning rate.")
+            elif (
                 our_name.startswith(gnn_feature_extractor_param_name)
                 and "final_norm_layer" not in our_name
             ):
@@ -291,14 +305,16 @@ class ADKTModelTrainer(ADKTModel):
             [
                 {"params": other_params, "lr": self.config.learning_rate},
                 {"params": gnn_params, "lr": self.config.learning_rate / 10},
+                {"params": gate_adapter_params, "lr": self.config.learning_rate * 10},  # 10x LR for gate/adapter
             ],
         )
 
         self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer=self.optimizer,
             lr_lambda=[
-                partial(linear_warmup, warmup_steps=0),  # for all params
+                partial(linear_warmup, warmup_steps=0),  # for other params
                 partial(linear_warmup, warmup_steps=100),  # for loaded GNN params
+                partial(linear_warmup, warmup_steps=0),  # for gate/adapter params
             ],
         )
 
@@ -412,6 +428,7 @@ class ADKTModelTrainer(ADKTModel):
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
 
+            #像创新点
             task_batch_mean_loss = np.mean(task_batch_losses)
             #task_batch_avg_metrics = avg_task_metrics_list(task_batch_metrics)
             metric_logger.log_metrics(
@@ -427,6 +444,11 @@ class ADKTModelTrainer(ADKTModel):
                 metric_to_use = "avg_precision"
 
             if step % self.config.validate_every_num_steps == 0:
+                # ✅ 打印门控权重日志
+                if hasattr(self, 'last_gate_weights') and self.last_gate_weights:
+                    gate_info = " | ".join([f"{k}: {v.item():.4f}" for k, v in self.last_gate_weights.items()])
+                    logger.info(f"[Step {step}] 🔒 Gate Weights: {gate_info}")
+                
                 valid_metric = validate_by_finetuning_on_tasks(self, dataset, aml_run=aml_run, metric_to_use=metric_to_use)
 
                 if aml_run:

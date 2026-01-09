@@ -368,3 +368,42 @@ sider/
 tox21/
 toxcast/
 data.zip
+
+# Datasets - Large files, do not commit
+fs-mol-dataset/
+datasets/
+*.tar
+*.tar.gz
+*.zip
+
+# Python virtual environments
+venv/
+.venv/
+env/
+.env/
+conda/
+.conda/
+
+# Large model files
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.h5
+
+# IDE specific
+.idea/
+.vscode/
+
+# Temporary and cache files
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Results and outputs (optional, uncomment if you want to keep)
+# visualize_results/

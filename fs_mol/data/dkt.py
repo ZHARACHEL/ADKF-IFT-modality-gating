@@ -153,6 +153,41 @@ def get_dkt_batcher(
     )
 
 
+
+class DKTTaskPipeline:
+    def __init__(self, task_sampler: StratifiedTaskSampler, batcher: FSMolBatcher, num_samples: int, filter_numeric_labels: bool):
+        self.task_sampler = task_sampler
+        self.batcher = batcher
+        self.num_samples = num_samples
+        self.filter_numeric_labels = filter_numeric_labels
+
+    def __call__(self, paths: List[RichPath], idx: int):
+        if len(paths) > 1:
+            raise ValueError()
+        task = FSMolTask.load_from_file(paths[0])
+
+        if self.filter_numeric_labels:
+            task_numeric_labels = np.array([task.samples[i].numeric_label for i in range(len(task.samples))])
+            if (
+                (np.all(task_numeric_labels>=0.0) and np.all(task_numeric_labels<=100.0)) 
+                or np.any(task_numeric_labels<=0.0) 
+                or np.any(np.isinf(task_numeric_labels)) 
+                or np.any(np.isnan(task_numeric_labels))
+            ):
+                return None
+
+        num_task_samples = 0
+        for _ in range(self.num_samples):
+            try:
+                task_sample = self.task_sampler.sample(task, seed=idx + num_task_samples)
+                num_task_samples += 1
+            except Exception as e:
+                logger.debug(f"{task.name}: Sampling failed: {e}")
+                continue
+
+            yield task_sample_to_dkt_task_sample(task_sample, self.batcher, self.filter_numeric_labels)
+
+
 def get_dkt_task_sample_iterable(
     dataset: FSMolDataset,
     data_fold: DataFold,
@@ -174,34 +209,10 @@ def get_dkt_task_sample_iterable(
         max_num_edges=max_num_edges,
     )
 
-    def path_to_batches_pipeline(paths: List[RichPath], idx: int):
-        if len(paths) > 1:
-            raise ValueError()
-        task = FSMolTask.load_from_file(paths[0])
-
-        if filter_numeric_labels:
-            task_numeric_labels = np.array([task.samples[i].numeric_label for i in range(len(task.samples))])
-            if (
-                (np.all(task_numeric_labels>=0.0) and np.all(task_numeric_labels<=100.0)) 
-                or np.any(task_numeric_labels<=0.0) 
-                or np.any(np.isinf(task_numeric_labels)) 
-                or np.any(np.isnan(task_numeric_labels))
-            ):
-                return None
-
-        num_task_samples = 0
-        for _ in range(num_samples):
-            try:
-                task_sample = task_sampler.sample(task, seed=idx + num_task_samples)
-                num_task_samples += 1
-            except Exception as e:
-                logger.debug(f"{task.name}: Sampling failed: {e}")
-                continue
-
-            yield task_sample_to_dkt_task_sample(task_sample, batcher, filter_numeric_labels)
+    processor = DKTTaskPipeline(task_sampler, batcher, num_samples, filter_numeric_labels)
 
     return dataset.get_task_reading_iterable(
         data_fold=data_fold,
-        task_reader_fn=path_to_batches_pipeline,
+        task_reader_fn=processor,
         repeat=repeat,
     )

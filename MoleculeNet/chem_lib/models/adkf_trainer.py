@@ -430,7 +430,7 @@ class Meta_Trainer(nn.Module):
                     y_s_true = eval_data['s_label']
                     y_score=torch.cat([y_score, y_s_score])
                     y_true=torch.cat([y_true, y_s_true])
-                auc = auroc(y_test_preds,y_test_trues,pos_label=1).item()
+                auc = auroc(y_test_preds, y_test_trues.int(), task='binary').item()
                 print(auc)
 
             auc_scores.append(auc)

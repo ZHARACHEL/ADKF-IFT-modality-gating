@@ -48,6 +48,14 @@ def add_train_cli_args(parser: argparse.ArgumentParser) -> None:
         help="Random seed to use.",
     )
 
+
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=0,
+        help="Number of workers to use for data loading. Default is 0 (main process only), which is safer for Windows.",
+    )
+
     parser.add_argument(
         "--azureml_logging", action="store_true", help="Log results using AML run context."
     )
@@ -72,6 +80,7 @@ def set_up_train_run(
     fsmol_dataset = FSMolDataset.from_directory(
         directory=RichPath.create(args.DATA_PATH),
         task_list_file=RichPath.create(args.task_list_file),
+        num_workers=args.num_workers,
     )
 
     if args.azureml_logging:
